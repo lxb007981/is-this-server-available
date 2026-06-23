@@ -11,6 +11,10 @@ ip,username,password
 192.168.139.128,username_here,password_here
 ```
 
+## Instalation
+
+**Download [sshpass-win32](https://github.com/xhcoding/sshpass-win32/releases/latest) and put it in PATH.**
+
 ## Usage
 
 ```bash
@@ -20,7 +24,7 @@ python3 main.py --servers servers.csv
 Optional SSH timeout:
 
 ```bash
-python3 main.py --servers servers.csv --timeout 15
+python3 main.py --servers servers.csv --timeout 5
 ```
 
 Each run checks the servers in a random order. The script stops as soon as it
@@ -33,7 +37,7 @@ No running processes found in NPU
 The SSH command is run in this form:
 
 ```bash
-sshpass -p PASSWORD -k ssh -o ConnectTimeout=TIMEOUT username@ip npu-smi info
+sshpass -p PASSWORD ssh -o StrictHostKeyChecking=no -o ConnectTimeout=TIMEOUT username@ip npu-smi info
 ```
 
 ## Exit Codes

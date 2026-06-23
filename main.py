@@ -38,8 +38,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--timeout",
         type=int,
-        default=15,
-        help="SSH connection timeout in seconds. Defaults to 15.",
+        default=5,
+        help="SSH connection timeout in seconds. Defaults to 5.",
     )
     return parser.parse_args()
 
@@ -80,8 +80,9 @@ def build_command(server: Server, timeout: int) -> list[str]:
         "sshpass",
         "-p",
         server.password,
-        "-k",
         "ssh",
+        "-o",
+        "StrictHostKeyChecking=no",
         "-o",
         f"ConnectTimeout={timeout}",
         f"{server.username}@{server.ip}",
@@ -100,7 +101,7 @@ def check_server(server: Server, timeout: int) -> tuple[bool, str]:
         command,
         capture_output=True,
         text=True,
-        timeout=timeout + 5,
+        timeout=timeout + 10, # covers sshpass, authentication, SSH startup, and remote command execution
         check=False,
     )
     output = result.stdout + result.stderr
