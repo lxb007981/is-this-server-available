@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import csv
 import random
 import shutil
@@ -40,6 +41,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=5,
         help="SSH connection timeout in seconds. Defaults to 5.",
+    )
+    parser.add_argument(
+        "-p",
+        "--parallel",
+        type=int,
+        default=3,
+        help="Maximum number of concurrent SSH connections. Defaults to 3.",
     )
     return parser.parse_args()
 
@@ -96,6 +104,7 @@ def is_available(output: str) -> bool:
 
 
 def check_server(server: Server, timeout: int) -> tuple[bool, str]:
+    print(f"Checking {server.username}@{server.ip} ...", flush=True)
     command = build_command(server, timeout)
     result = subprocess.run(
         command,
@@ -108,24 +117,45 @@ def check_server(server: Server, timeout: int) -> tuple[bool, str]:
     return is_available(output), output
 
 
-def find_available_server(servers: list[Server], timeout: int) -> Optional[Server]:
+def find_available_server(
+    servers: list[Server], timeout: int, parallel: int = 3
+) -> Optional[Server]:
+    # Avoid consistently favoring servers that appear first in the CSV.
     random.shuffle(servers)
 
-    for server in servers:
-        print(f"Checking {server.username}@{server.ip} ...", flush=True)
-        try:
-            available, _output = check_server(server, timeout)
-        except subprocess.TimeoutExpired:
-            print(f"  skipped: timed out after {timeout + 5} seconds", flush=True)
-            continue
-        except OSError as error:
-            print(f"  skipped: failed to run ssh command: {error}", flush=True)
-            continue
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
+        futures = {}
+        for server in servers:
+            future = executor.submit(check_server, server, timeout)
+            futures[future] = server
 
-        if available:
-            return server
+        # Process checks as they finish so a fast available server can be returned early.
+        for future in concurrent.futures.as_completed(futures):
+            server = futures[future]
+            try:
+                available, _output = future.result()
+            except subprocess.TimeoutExpired:
+                print(
+                    f"  {server.username}@{server.ip} skipped: "
+                    f"timed out after {timeout + 10} seconds",
+                    flush=True,
+                )
+                continue
+            except OSError as error:
+                print(
+                    f"  {server.username}@{server.ip} skipped: "
+                    f"failed to run ssh command: {error}",
+                    flush=True,
+                )
+                continue
 
-        print("  not available", flush=True)
+            if available:
+                # Cancellation is best-effort: checks that are already running will finish.
+                for pending_future in futures:
+                    pending_future.cancel()
+                return server
+
+            print(f"  {server.username}@{server.ip} not available", flush=True)
 
     return None
 
@@ -135,6 +165,9 @@ def main() -> int:
 
     if args.timeout <= 0:
         print("Error: --timeout must be greater than 0", file=sys.stderr)
+        return EXIT_ERROR
+    if args.parallel <= 0:
+        print("Error: --parallel must be greater than 0", file=sys.stderr)
         return EXIT_ERROR
 
     try:
@@ -147,7 +180,7 @@ def main() -> int:
         print("Error: sshpass is not installed or not on PATH", file=sys.stderr)
         return EXIT_ERROR
 
-    server = find_available_server(servers, args.timeout)
+    server = find_available_server(servers, args.timeout, args.parallel)
     if server is None:
         print("No available server found.")
         return EXIT_NONE_AVAILABLE

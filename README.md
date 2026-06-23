@@ -27,8 +27,15 @@ Optional SSH timeout:
 python3 main.py --servers servers.csv --timeout 5
 ```
 
-Each run checks the servers in a random order. The script stops as soon as it
-finds a server whose `npu-smi info` output contains exactly 8 occurrences of:
+Run up to a specific number of SSH checks concurrently (defaults to 3):
+
+```bash
+python3 main.py --servers servers.csv --parallel 6
+```
+
+Each run checks the servers in a random order, with no more than the configured
+number of concurrent SSH connections. The script stops as soon as it finds a
+server whose `npu-smi info` output contains exactly 8 occurrences of:
 
 ```text
 No running processes found in NPU
@@ -44,4 +51,4 @@ sshpass -p PASSWORD ssh -o StrictHostKeyChecking=no -o ConnectTimeout=TIMEOUT us
 
 - `0`: available server found
 - `1`: all servers checked, none available
-- `2`: setup or input error, such as missing `sshpass`, invalid CSV, or invalid timeout
+- `2`: setup or input error, such as missing `sshpass`, invalid CSV, or invalid options
