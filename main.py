@@ -25,6 +25,13 @@ class Server:
     password: str
 
 
+@dataclass(frozen=True)
+class ServerResult:
+    server: Server
+    available: Optional[bool]
+    error: Optional[str] = None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Find the first server whose 8 NPUs are idle."
@@ -48,6 +55,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=3,
         help="Maximum number of concurrent SSH connections. Defaults to 3.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Check every server and report all results after the checks finish.",
     )
     return parser.parse_args()
 
@@ -160,6 +172,53 @@ def find_available_server(
     return None
 
 
+def check_all_servers(
+    servers: list[Server], timeout: int, parallel: int = 3
+) -> list[ServerResult]:
+    # Keep the final report in CSV order while still querying in a random order.
+    indexed_servers = list(enumerate(servers))
+    random.shuffle(indexed_servers)
+    results: list[Optional[ServerResult]] = [None] * len(servers)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
+        futures = {
+            executor.submit(check_server, server, timeout): (index, server)
+            for index, server in indexed_servers
+        }
+
+        for future in concurrent.futures.as_completed(futures):
+            index, server = futures[future]
+            try:
+                available, _output = future.result()
+                results[index] = ServerResult(server, available)
+            except subprocess.TimeoutExpired:
+                results[index] = ServerResult(
+                    server,
+                    None,
+                    f"timed out after {timeout + 10} seconds",
+                )
+            except OSError as error:
+                results[index] = ServerResult(
+                    server,
+                    None,
+                    f"failed to run ssh command: {error}",
+                )
+
+    # Every submitted future is processed above, so all entries are populated.
+    return [result for result in results if result is not None]
+
+
+def print_all_results(results: list[ServerResult]) -> None:
+    available_servers = [result.server for result in results if result.available]
+    if not available_servers:
+        print("No available server found.")
+        return
+
+    print("Available servers:")
+    for server in available_servers:
+        print(f"  {server.username}@{server.ip}")
+
+
 def main() -> int:
     args = parse_args()
 
@@ -179,6 +238,13 @@ def main() -> int:
     if shutil.which("sshpass") is None:
         print("Error: sshpass is not installed or not on PATH", file=sys.stderr)
         return EXIT_ERROR
+
+    if args.all:
+        results = check_all_servers(servers, args.timeout, args.parallel)
+        print_all_results(results)
+        if any(result.available for result in results):
+            return EXIT_FOUND
+        return EXIT_NONE_AVAILABLE
 
     server = find_available_server(servers, args.timeout, args.parallel)
     if server is None:

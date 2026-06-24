@@ -33,13 +33,22 @@ Run up to a specific number of SSH checks concurrently (defaults to 3):
 python3 main.py --servers servers.csv --parallel 6
 ```
 
+Check every server without stopping early, then report all available servers:
+
+```bash
+python3 main.py --servers servers.csv --all
+```
+
 Each run checks the servers in a random order, with no more than the configured
-number of concurrent SSH connections. The script stops as soon as it finds a
-server whose `npu-smi info` output contains exactly 8 occurrences of:
+number of concurrent SSH connections. By default, the script stops as soon as it
+finds a server whose `npu-smi info` output contains exactly 8 occurrences of:
 
 ```text
 No running processes found in NPU
 ```
+
+With `--all`, every server is checked and the available servers are displayed in
+CSV order after all checks finish.
 
 The SSH command is run in this form:
 
