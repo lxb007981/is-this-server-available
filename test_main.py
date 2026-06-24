@@ -8,6 +8,64 @@ from unittest import mock
 import main
 
 
+def make_process_output(*process_names):
+    lines = [
+        "+---------------------------+---------------+--------------------+",
+        "| NPU     Chip              | Process id    | Process name             "
+        "| Process memory(MB)      |",
+        "+===========================+===============+====================+",
+    ]
+    lines.extend(
+        f"| {index}       0                 | {1000 + index}          | {name:<24} | 1024                    |"
+        for index, name in enumerate(process_names)
+    )
+    lines.append(
+        "+===========================+===============+====================+"
+    )
+    return "\n".join(lines)
+
+
+class AvailabilityTests(unittest.TestCase):
+    def test_eight_idle_markers_are_available(self):
+        output = "\n".join([main.IDLE_MARKER] * 8)
+
+        self.assertTrue(main.is_available(output))
+        self.assertFalse(main.is_available("\n".join([main.IDLE_MARKER] * 7)))
+        self.assertFalse(main.is_available("\n".join([main.IDLE_MARKER] * 9)))
+
+    def test_only_allowed_worker_processes_are_available(self):
+        allowed_process_sets = [
+            ("VLLMWorker_TP",),
+            ("VLLMWorker_DP",),
+            ("VLLMWorker_TP", "VLLMWorker_DP"),
+        ]
+
+        for process_names in allowed_process_sets:
+            with self.subTest(process_names=process_names):
+                self.assertTrue(main.is_available(make_process_output(*process_names)))
+
+    def test_other_or_partial_process_name_is_not_available(self):
+        disallowed_process_sets = [
+            ("VLLMWorker_DP", "python"),
+            ("VLLMWorker_extra",),
+        ]
+
+        for process_names in disallowed_process_sets:
+            with self.subTest(process_names=process_names):
+                self.assertFalse(main.is_available(make_process_output(*process_names)))
+
+    def test_allowed_name_outside_process_table_is_not_available(self):
+        self.assertFalse(main.is_available("diagnostic: VLLMWorker_DP"))
+
+    def test_empty_or_malformed_process_table_is_not_available(self):
+        self.assertFalse(main.is_available(make_process_output()))
+
+        malformed_output = make_process_output("VLLMWorker_DP").replace(
+            "| 0       0", "| invalid", 1
+        )
+        self.assertFalse(main.is_available(malformed_output))
+
+
 class AllServersTests(unittest.TestCase):
     def setUp(self):
         self.servers = [

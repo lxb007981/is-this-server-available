@@ -11,6 +11,13 @@ from typing import Optional
 
 
 IDLE_MARKER = "No running processes found in NPU"
+ALLOWED_PROCESS_NAMES = frozenset({"VLLMWorker", "VLLMWorker_TP", "VLLMWorker_DP"})
+PROCESS_TABLE_HEADER = (
+    "NPU Chip",
+    "Process id",
+    "Process name",
+    "Process memory(MB)",
+)
 REQUIRED_COLUMNS = ("ip", "username", "password")
 
 EXIT_FOUND = 0
@@ -34,7 +41,7 @@ class ServerResult:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Find the first server whose 8 NPUs are idle."
+        description="Find the first available server using npu-smi process status."
     )
     parser.add_argument(
         "-s",
@@ -111,8 +118,57 @@ def build_command(server: Server, timeout: int) -> list[str]:
     ]
 
 
+def _extract_process_names(output: str) -> Optional[list[str]]:
+    process_names: list[str] = []
+    in_process_table = False
+
+    for line in output.splitlines():
+        stripped_line = line.strip()
+        cells = [cell.strip() for cell in stripped_line.strip("|").split("|")]
+        normalized_cells = tuple(" ".join(cell.split()) for cell in cells)
+
+        if normalized_cells == PROCESS_TABLE_HEADER:
+            in_process_table = True
+            continue
+
+        if not in_process_table or not stripped_line:
+            continue
+
+        if stripped_line.startswith("+") and set(stripped_line) <= {"+", "-", "="}:
+            continue
+
+        # Ignore diagnostics appended after the table, but fail closed for malformed
+        # pipe-delimited rows that appear to belong to the process table.
+        if not (stripped_line.startswith("|") and stripped_line.endswith("|")):
+            continue
+        if len(cells) != 4:
+            return None
+
+        npu_and_chip = cells[0].split()
+        if (
+            len(npu_and_chip) != 2
+            or not all(value.isdigit() for value in npu_and_chip)
+            or not cells[1].isdigit()
+            or not cells[3].isdigit()
+            or not cells[2]
+        ):
+            return None
+
+        process_names.append(cells[2])
+
+    if not in_process_table:
+        return None
+    return process_names
+
+
 def is_available(output: str) -> bool:
-    return output.count(IDLE_MARKER) == 8
+    if output.count(IDLE_MARKER) == 8:
+        return True
+
+    process_names = _extract_process_names(output)
+    return bool(process_names) and all(
+        process_name in ALLOWED_PROCESS_NAMES for process_name in process_names
+    )
 
 
 def check_server(server: Server, timeout: int) -> tuple[bool, str]:

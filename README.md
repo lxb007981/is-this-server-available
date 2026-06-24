@@ -1,6 +1,6 @@
 # Is This Server Available?
 
-Find the first server whose 8 NPUs are idle by running `npu-smi info` over SSH.
+Find the first available server by running `npu-smi info` over SSH.
 
 ## Server CSV
 
@@ -41,11 +41,13 @@ python3 main.py --servers servers.csv --all
 
 Each run checks the servers in a random order, with no more than the configured
 number of concurrent SSH connections. By default, the script stops as soon as it
-finds a server whose `npu-smi info` output contains exactly 8 occurrences of:
+finds a server whose `npu-smi info` output meets either availability condition:
 
-```text
-No running processes found in NPU
-```
+- The output contains exactly 8 occurrences of
+  `No running processes found in NPU`.
+
+- The process table contains at least one process and every process name is
+  exactly `VLLMWorker` `VLLMWorker_TP` or `VLLMWorker_DP`.
 
 With `--all`, every server is checked and the available servers are displayed in
 CSV order after all checks finish.
